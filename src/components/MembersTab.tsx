@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Member, MealEntry, User } from "../types";
-import { PlusCircle, MinusCircle } from "lucide-react";
+import { supabase } from "../utils/supabase";
 
 interface MembersTabProps {
   members: Member[];
@@ -12,6 +12,8 @@ interface MembersTabProps {
   setMembers: (members: Member[]) => void;
   setMealEntries: (mealEntries: MealEntry[]) => void;
   setSelectedMember: (memberId: string | null) => void;
+  setSelectedDate: (date: string) => void;
+  setSelectedMonth: (month: string) => void; // Added
 }
 
 export default function MembersTab({
@@ -24,6 +26,8 @@ export default function MembersTab({
   setMembers,
   setMealEntries,
   setSelectedMember,
+  setSelectedDate,
+  setSelectedMonth, // Added
 }: MembersTabProps) {
   const [newMemberName, setNewMemberName] = useState<string>("");
   const [mealCountInput, setMealCountInput] = useState<string>("");
@@ -34,61 +38,74 @@ export default function MembersTab({
   const isManager = user?.role === "manager";
   const canEdit = isAdmin || isManager;
 
-  const addMember = () => {
+  const addMember = async () => {
     if (newMemberName.trim() && isAdmin) {
-      setMembers([
-        ...members,
-        {
-          id: Date.now().toString(),
-          name: newMemberName.trim(),
-          role: "member",
-          created_by: user!.username,
-        },
-      ]);
+      const newMember: Member = {
+        id: crypto.randomUUID(),
+        name: newMemberName.trim(),
+        role: "member", // Explicitly set to 'member'
+        created_by: user!.username,
+      };
+      await supabase.from("members").insert(newMember);
+      setMembers([...members, newMember]);
       setNewMemberName("");
     }
   };
 
-  const updateMemberRole = (
+  const updateMemberRole = async (
     memberId: string,
     newRole: "manager" | "member"
   ) => {
     if (isAdmin) {
+      await supabase
+        .from("members")
+        .update({ role: newRole })
+        .eq("id", memberId);
       setMembers(
         members.map((m) => (m.id === memberId ? { ...m, role: newRole } : m))
       );
     }
   };
 
-  const addMeal = (memberId: string) => {
+  const addMeal = async (memberId: string) => {
     if (
       canEdit &&
       !isNaN(Number(mealCountInput)) &&
       Number(mealCountInput) >= 0
     ) {
-      const existingEntryIndex = mealEntries.findIndex(
+      const existingEntry = mealEntries.find(
         (e) => e.member_id === memberId && e.date === selectedDate
       );
-      if (existingEntryIndex >= 0) {
-        const updatedEntries = [...mealEntries];
-        updatedEntries[existingEntryIndex] = {
-          ...updatedEntries[existingEntryIndex],
+      if (existingEntry) {
+        await supabase
+          .from("meal_entries")
+          .update({
+            count: Number(mealCountInput),
+            updated_by: user!.username,
+          })
+          .eq("id", existingEntry.id);
+        setMealEntries(
+          mealEntries.map((e) =>
+            e.id === existingEntry.id
+              ? {
+                  ...e,
+                  count: Number(mealCountInput),
+                  updated_by: user!.username,
+                }
+              : e
+          )
+        );
+      } else {
+        const newEntry = {
+          id: crypto.randomUUID(),
+          member_id: memberId,
+          date: selectedDate,
           count: Number(mealCountInput),
+          created_by: user!.username,
           updated_by: user!.username,
         };
-        setMealEntries(updatedEntries);
-      } else {
-        setMealEntries([
-          ...mealEntries,
-          {
-            id: Date.now().toString(),
-            member_id: memberId,
-            date: selectedDate,
-            count: Number(mealCountInput),
-            created_by: user!.username,
-            updated_by: user!.username,
-          },
-        ]);
+        await supabase.from("meal_entries").insert(newEntry);
+        setMealEntries([...mealEntries, newEntry]);
       }
       setMealCountInput("");
     }
@@ -101,12 +118,19 @@ export default function MembersTab({
     }
   };
 
-  const saveEditMeal = (entryId: string) => {
+  const saveEditMeal = async (entryId: string) => {
     if (
       canEdit &&
       !isNaN(Number(editMealCount)) &&
       Number(editMealCount) >= 0
     ) {
+      await supabase
+        .from("meal_entries")
+        .update({
+          count: Number(editMealCount),
+          updated_by: user!.username,
+        })
+        .eq("id", entryId);
       setMealEntries(
         mealEntries.map((e) =>
           e.id === entryId
@@ -119,8 +143,9 @@ export default function MembersTab({
     }
   };
 
-  const deleteMeal = (entryId: string) => {
+  const deleteMeal = async (entryId: string) => {
     if (canEdit) {
+      await supabase.from("meal_entries").delete().eq("id", entryId);
       setMealEntries(mealEntries.filter((e) => e.id !== entryId));
     }
   };
@@ -231,7 +256,7 @@ export default function MembersTab({
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-lg sm:text-xl font-semibold">
               {members.find((m) => m.id === selectedMember)?.name || "Unknown"}
-              's Meals
+              &apos;s Meals
             </h2>
             <button
               onClick={() => setSelectedMember(null)}

@@ -1,103 +1,230 @@
-import Image from "next/image";
+"use client";
+
+import { useState, useEffect } from "react";
+import {
+  Member,
+  MealEntry,
+  ShoppingItem,
+  RentCost,
+  User,
+  MonthlyCosts,
+  RentPayment,
+} from "../types";
+import {
+  loadMembers,
+  saveMembers,
+  loadMealEntries,
+  saveMealEntries,
+  loadShoppingList,
+  saveShoppingList,
+  loadRentCosts,
+  saveRentCosts,
+  loadUser,
+  loadRentPayments,
+  saveRentPayments,
+  supabase,
+} from "../utils/supabase";
+import Login from "../components/Login";
+import Tabs from "../components/Tabs";
+import MembersTab from "../components/MembersTab";
+import ShoppingTab from "../components/ShoppingTab";
+import RentTab from "../components/RentTab";
+import CalculationTab from "../components/CalculationTab";
 
 export default function Home() {
-  return (
-    <div className="grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20 font-[family-name:var(--font-geist-sans)]">
-      <main className="flex flex-col gap-[32px] row-start-2 items-center sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={180}
-          height={38}
-          priority
-        />
-        <ol className="list-inside list-decimal text-sm/6 text-center sm:text-left font-[family-name:var(--font-geist-mono)]">
-          <li className="mb-2 tracking-[-.01em]">
-            Get started by editing{" "}
-            <code className="bg-black/[.05] dark:bg-white/[.06] px-1 py-0.5 rounded font-[family-name:var(--font-geist-mono)] font-semibold">
-              src/app/page.tsx
-            </code>
-            .
-          </li>
-          <li className="tracking-[-.01em]">
-            Save and see your changes instantly.
-          </li>
-        </ol>
+  const [members, setMembers] = useState<Member[]>([]);
+  const [mealEntries, setMealEntries] = useState<MealEntry[]>([]);
+  const [shoppingList, setShoppingList] = useState<ShoppingItem[]>([]);
+  const [rentCosts, setRentCosts] = useState<RentCost[]>([]);
+  const [rentPayments, setRentPayments] = useState<RentPayment[]>([]);
+  const [user, setUser] = useState<User | null>(null);
+  const [selectedDate, setSelectedDate] = useState<string>(
+    new Date().toISOString().split("T")[0]
+  );
+  const [selectedMonth, setSelectedMonth] = useState<string>(
+    new Date().toISOString().slice(0, 7)
+  );
+  const [activeTab, setActiveTab] = useState<
+    "members" | "shopping" | "rent" | "calculation"
+  >("members");
+  const [selectedMember, setSelectedMember] = useState<string | null>(null);
 
-        <div className="flex gap-4 items-center flex-col sm:flex-row">
-          <a
-            className="rounded-full border border-solid border-transparent transition-colors flex items-center justify-center bg-foreground text-background gap-2 hover:bg-[#383838] dark:hover:bg-[#ccc] font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 sm:w-auto"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        setMembers(await loadMembers());
+        setMealEntries(await loadMealEntries());
+        setShoppingList(await loadShoppingList());
+        setRentCosts(await loadRentCosts());
+        setRentPayments(await loadRentPayments());
+      } catch (error) {
+        console.error("Error fetching data:", error);
+      }
+    };
+
+    fetchData();
+
+    const { data: authListener } = supabase.auth.onAuthStateChange(
+      async (event, session) => {
+        if (event === "SIGNED_IN" && session?.user) {
+          const userData = await loadUser(session.user.id);
+          if (userData) setUser(userData);
+        } else if (event === "SIGNED_OUT") {
+          setUser(null);
+        }
+      }
+    );
+
+    return () => {
+      authListener.subscription.unsubscribe();
+    };
+  }, []);
+
+  useEffect(() => {
+    saveMembers(members);
+  }, [members]);
+
+  useEffect(() => {
+    saveMealEntries(mealEntries);
+  }, [mealEntries]);
+
+  useEffect(() => {
+    saveShoppingList(shoppingList);
+  }, [shoppingList]);
+
+  useEffect(() => {
+    saveRentCosts(rentCosts);
+  }, [rentCosts]);
+
+  useEffect(() => {
+    saveRentPayments(rentPayments);
+  }, [rentPayments]);
+
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+    setUser(null);
+  };
+
+  const calculateMonthlyCosts = (): MonthlyCosts => {
+    const monthStart = selectedMonth + "-01";
+    const monthEnd = selectedMonth + "-31";
+
+    const monthlyShoppingList = shoppingList.filter(
+      (item) => item.date >= monthStart && item.date <= monthEnd
+    );
+
+    const monthlyMealEntries = mealEntries.filter(
+      (entry) => entry.date >= monthStart && entry.date <= monthEnd
+    );
+
+    const monthlyRent =
+      rentCosts.find((rent) => rent.month.startsWith(selectedMonth))?.amount ||
+      0;
+
+    const totalCost = monthlyShoppingList.reduce(
+      (sum, item) => sum + item.cost,
+      0
+    );
+    const totalMeals = monthlyMealEntries.reduce(
+      (sum, entry) => sum + entry.count,
+      0
+    );
+    const perMealCost = totalMeals > 0 ? totalCost / totalMeals : 0;
+    const perPersonRent = members.length > 0 ? monthlyRent / members.length : 0;
+
+    return {
+      month: selectedMonth,
+      totalCost,
+      perMealCost,
+      rentCost: monthlyRent,
+      perPersonRent,
+      memberCosts: members.map((member) => {
+        const memberMealCount = monthlyMealEntries
+          .filter((entry) => entry.member_id === member.id)
+          .reduce((sum, entry) => sum + entry.count, 0);
+        const mealCost = memberMealCount * perMealCost;
+        const rentPaid = rentPayments.some(
+          (p) => p.member_id === member.id && p.month === monthStart && p.paid
+        );
+        const totalCost = mealCost + (rentPaid ? 0 : perPersonRent);
+        return {
+          memberId: member.id,
+          name: member.name,
+          mealCount: memberMealCount,
+          mealCost,
+          rentShare: perPersonRent,
+          rentPaid,
+          totalCost,
+        };
+      }),
+    };
+  };
+
+  const costs = calculateMonthlyCosts();
+
+  if (!user) {
+    return <Login />;
+  }
+
+  return (
+    <div className="min-h-screen bg-gray-50 p-2 sm:p-4 md:p-6 lg:p-8">
+      <div className="bg-white rounded-xl shadow-lg p-4 sm:p-6 md:p-8 max-w-4xl mx-auto">
+        <div className="flex justify-between items-center mb-4">
+          <h1 className="text-lg sm:text-xl font-semibold">
+            Welcome, {user.username} ({user.role})
+          </h1>
+          <button
+            onClick={handleLogout}
+            className="px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 text-sm sm:text-base"
           >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={20}
-              height={20}
-            />
-            Deploy now
-          </a>
-          <a
-            className="rounded-full border border-solid border-black/[.08] dark:border-white/[.145] transition-colors flex items-center justify-center hover:bg-[#f2f2f2] dark:hover:bg-[#1a1a1a] hover:border-transparent font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 w-full sm:w-auto md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Read our docs
-          </a>
+            Logout
+          </button>
         </div>
-      </main>
-      <footer className="row-start-3 flex gap-[24px] flex-wrap items-center justify-center">
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/file.svg"
-            alt="File icon"
-            width={16}
-            height={16}
+        <Tabs activeTab={activeTab} setActiveTab={setActiveTab} />
+        {activeTab === "members" && (
+          <MembersTab
+            members={members}
+            mealEntries={mealEntries}
+            user={user}
+            selectedDate={selectedDate}
+            selectedMonth={selectedMonth}
+            selectedMember={selectedMember}
+            setMembers={setMembers}
+            setMealEntries={setMealEntries}
+            setSelectedMember={setSelectedMember}
+            setSelectedDate={setSelectedDate}
+            setSelectedMonth={setSelectedMonth}
           />
-          Learn
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
+        )}
+        {activeTab === "shopping" && (
+          <ShoppingTab
+            shoppingList={shoppingList}
+            user={user}
+            selectedDate={selectedDate}
+            setShoppingList={setShoppingList}
+            setSelectedDate={setSelectedDate}
           />
-          Examples
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
+        )}
+        {activeTab === "rent" && (
+          <RentTab
+            rentCosts={rentCosts}
+            rentPayments={rentPayments}
+            members={members}
+            user={user}
+            selectedMonth={selectedMonth}
+            setRentCosts={setRentCosts}
+            setRentPayments={setRentPayments}
+            setSelectedMonth={setSelectedMonth}
           />
-          Go to nextjs.org →
-        </a>
-      </footer>
+        )}
+        {activeTab === "calculation" && (
+          <CalculationTab
+            costs={costs}
+            selectedMonth={selectedMonth}
+            setSelectedMonth={setSelectedMonth}
+          />
+        )}
+      </div>
     </div>
   );
 }

@@ -1,71 +1,80 @@
 import { useState } from "react";
-import { RentCost, User } from "../types";
+import { RentCost, RentPayment, Member, User } from "../types";
+import { supabase } from "../utils/supabase";
 
 interface RentTabProps {
   rentCosts: RentCost[];
+  rentPayments: RentPayment[];
+  members: Member[];
   user: User | null;
   selectedMonth: string;
   setRentCosts: (rentCosts: RentCost[]) => void;
+  setRentPayments: (rentPayments: RentPayment[]) => void;
+  setSelectedMonth: (month: string) => void; // Added
 }
 
 export default function RentTab({
   rentCosts,
+  rentPayments,
+  members,
   user,
   selectedMonth,
   setRentCosts,
+  setRentPayments,
+  setSelectedMonth, // Added
 }: RentTabProps) {
-  const [newRentAmount, setNewRentAmount] = useState<string>("");
-  const [editRentId, setEditRentId] = useState<string | null>(null);
-  const [editRentAmount, setEditRentAmount] = useState<string>("");
+  const [rentAmount, setRentAmount] = useState<string>("");
 
   const isAdmin = user?.role === "admin";
   const isManager = user?.role === "manager";
   const canEdit = isAdmin || isManager;
 
-  const addRentCost = () => {
-    if (!isNaN(Number(newRentAmount)) && canEdit) {
-      setRentCosts([
-        ...rentCosts,
-        {
-          id: Date.now().toString(),
-          month: selectedMonth + "-01",
-          amount: Number(newRentAmount),
-          created_by: user!.username,
-          updated_by: user!.username,
-        },
-      ]);
-      setNewRentAmount("");
+  const addRentCost = async () => {
+    if (rentAmount && !isNaN(Number(rentAmount)) && canEdit) {
+      const newRentCost = {
+        id: crypto.randomUUID(),
+        month: selectedMonth,
+        amount: Number(rentAmount),
+        created_by: user!.username,
+      };
+      await supabase.from("rent_costs").insert(newRentCost);
+      setRentCosts([...rentCosts, newRentCost]);
+      setRentAmount("");
     }
   };
 
-  const editRentCost = (rent: RentCost) => {
+  const toggleRentPayment = async (memberId: string) => {
     if (canEdit) {
-      setEditRentId(rent.id);
-      setEditRentAmount(rent.amount.toString());
-    }
-  };
-
-  const saveEditRentCost = (rentId: string) => {
-    if (!isNaN(Number(editRentAmount)) && canEdit) {
-      setRentCosts(
-        rentCosts.map((rent) =>
-          rent.id === rentId
-            ? {
-                ...rent,
-                amount: Number(editRentAmount),
-                updated_by: user!.username,
-              }
-            : rent
-        )
+      const monthStart = selectedMonth + "-01";
+      const existingPayment = rentPayments.find(
+        (p) => p.member_id === memberId && p.month === monthStart
       );
-      setEditRentId(null);
-      setEditRentAmount("");
-    }
-  };
 
-  const deleteRentCost = (rentId: string) => {
-    if (canEdit) {
-      setRentCosts(rentCosts.filter((rent) => rent.id !== rentId));
+      if (existingPayment) {
+        const updatedPayment = {
+          ...existingPayment,
+          paid: !existingPayment.paid,
+        };
+        await supabase
+          .from("rent_payments")
+          .update({ paid: updatedPayment.paid })
+          .eq("id", existingPayment.id);
+        setRentPayments(
+          rentPayments.map((p) =>
+            p.id === existingPayment.id ? updatedPayment : p
+          )
+        );
+      } else {
+        const newPayment = {
+          id: crypto.randomUUID(),
+          member_id: memberId,
+          month: monthStart,
+          paid: true,
+          created_by: user!.username,
+        };
+        await supabase.from("rent_payments").insert(newPayment);
+        setRentPayments([...rentPayments, newPayment]);
+      }
     }
   };
 
@@ -85,9 +94,9 @@ export default function RentTab({
         <div className="flex flex-col sm:flex-row gap-2 mb-4">
           <input
             type="number"
-            value={newRentAmount}
+            value={rentAmount}
             onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-              setNewRentAmount(e.target.value)
+              setRentAmount(e.target.value)
             }
             placeholder="Rent amount"
             className="flex-1 px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm sm:text-base"
@@ -97,72 +106,39 @@ export default function RentTab({
             onClick={addRentCost}
             className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 text-sm sm:text-base"
           >
-            Add
+            Add Rent
           </button>
         </div>
       )}
       <div className="space-y-3">
-        {rentCosts
-          .filter((rent) => rent.month.startsWith(selectedMonth))
-          .map((rent) => (
+        {members.map((member) => {
+          const payment = rentPayments.find(
+            (p) =>
+              p.member_id === member.id && p.month === selectedMonth + "-01"
+          );
+          return (
             <div
-              key={rent.id}
+              key={member.id}
               className="flex items-center justify-between bg-gray-50 p-3 sm:p-4 rounded-lg"
             >
-              {editRentId === rent.id && canEdit ? (
-                <div className="flex flex-col sm:flex-row gap-2 w-full">
-                  <input
-                    type="number"
-                    value={editRentAmount}
-                    onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                      setEditRentAmount(e.target.value)
-                    }
-                    className="flex-1 px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm sm:text-base"
-                    min="0"
-                  />
-                  <button
-                    onClick={() => saveEditRentCost(rent.id)}
-                    className="px-3 py-1 bg-green-500 text-white rounded-lg hover:bg-green-600 text-sm sm:text-base"
-                  >
-                    Save
-                  </button>
-                  <button
-                    onClick={() => setEditRentId(null)}
-                    className="px-3 py-1 bg-gray-500 text-white rounded-lg hover:bg-gray-600 text-sm sm:text-base"
-                  >
-                    Cancel
-                  </button>
-                </div>
-              ) : (
-                <>
-                  <div className="font-medium text-sm sm:text-base">
-                    Rent for {rent.month.slice(0, 7)}
-                  </div>
-                  <div className="flex items-center gap-2 sm:gap-3">
-                    <div className="font-semibold text-sm sm:text-base">
-                      ${rent.amount.toFixed(2)}
-                    </div>
-                    {canEdit && (
-                      <>
-                        <button
-                          onClick={() => editRentCost(rent)}
-                          className="text-blue-500 hover:text-blue-600"
-                        >
-                          Edit
-                        </button>
-                        <button
-                          onClick={() => deleteRentCost(rent.id)}
-                          className="text-red-500 hover:text-red-600"
-                        >
-                          Delete
-                        </button>
-                      </>
-                    )}
-                  </div>
-                </>
-              )}
+              <div className="font-medium text-sm sm:text-base">
+                {member.name}
+              </div>
+              <div className="flex items-center gap-2 sm:gap-3">
+                <input
+                  type="checkbox"
+                  checked={payment?.paid || false}
+                  onChange={() => toggleRentPayment(member.id)}
+                  disabled={!canEdit}
+                  className="h-4 w-4 text-blue-500 focus:ring-blue-500 border-gray-300 rounded"
+                />
+                <span className="text-sm sm:text-base">
+                  {payment?.paid ? "Paid" : "Unpaid"}
+                </span>
+              </div>
             </div>
-          ))}
+          );
+        })}
       </div>
     </div>
   );

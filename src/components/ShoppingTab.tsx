@@ -1,11 +1,13 @@
 import { useState } from "react";
 import { ShoppingItem, User } from "../types";
+import { supabase } from "../utils/supabase";
 
 interface ShoppingTabProps {
   shoppingList: ShoppingItem[];
   user: User | null;
   selectedDate: string;
   setShoppingList: (shoppingList: ShoppingItem[]) => void;
+  setSelectedDate: (date: string) => void;
 }
 
 export default function ShoppingTab({
@@ -13,6 +15,7 @@ export default function ShoppingTab({
   user,
   selectedDate,
   setShoppingList,
+  setSelectedDate,
 }: ShoppingTabProps) {
   const [newItemName, setNewItemName] = useState<string>("");
   const [newItemCost, setNewItemCost] = useState<string>("");
@@ -25,19 +28,18 @@ export default function ShoppingTab({
   const isManager = user?.role === "manager";
   const canEdit = isAdmin || isManager;
 
-  const addShoppingItem = () => {
+  const addShoppingItem = async () => {
     if (newItemName.trim() && !isNaN(Number(newItemCost)) && canEdit) {
-      setShoppingList([
-        ...shoppingList,
-        {
-          id: Date.now().toString(),
-          name: newItemName.trim(),
-          cost: Number(newItemCost),
-          date: selectedDate,
-          created_by: user!.username,
-          updated_by: user!.username,
-        },
-      ]);
+      const newItem = {
+        id: crypto.randomUUID(),
+        name: newItemName.trim(),
+        cost: Number(newItemCost),
+        date: selectedDate,
+        created_by: user!.username,
+        updated_by: user!.username,
+      };
+      await supabase.from("shopping_list").insert(newItem);
+      setShoppingList([...shoppingList, newItem]);
       setNewItemName("");
       setNewItemCost("");
     }
@@ -52,24 +54,23 @@ export default function ShoppingTab({
     }
   };
 
-  const saveEditShoppingItem = (itemId: string) => {
+  const saveEditShoppingItem = async (itemId: string) => {
     if (
       editItemName.trim() &&
       !isNaN(Number(editItemCost)) &&
       editItemDate &&
       canEdit
     ) {
+      const updatedItem = {
+        name: editItemName.trim(),
+        cost: Number(editItemCost),
+        date: editItemDate,
+        updated_by: user!.username,
+      };
+      await supabase.from("shopping_list").update(updatedItem).eq("id", itemId);
       setShoppingList(
         shoppingList.map((item) =>
-          item.id === itemId
-            ? {
-                ...item,
-                name: editItemName.trim(),
-                cost: Number(editItemCost),
-                date: editItemDate,
-                updated_by: user!.username,
-              }
-            : item
+          item.id === itemId ? { ...item, ...updatedItem } : item
         )
       );
       setEditItemId(null);
@@ -79,8 +80,9 @@ export default function ShoppingTab({
     }
   };
 
-  const deleteShoppingItem = (itemId: string) => {
+  const deleteShoppingItem = async (itemId: string) => {
     if (canEdit) {
+      await supabase.from("shopping_list").delete().eq("id", itemId);
       setShoppingList(shoppingList.filter((item) => item.id !== itemId));
     }
   };
