@@ -49,6 +49,7 @@ export default function Home() {
   >("members");
   const [selectedMember, setSelectedMember] = useState<string | null>(null);
 
+  // Load data on mount
   useEffect(() => {
     const fetchData = async () => {
       try {
@@ -64,6 +65,7 @@ export default function Home() {
 
     fetchData();
 
+    // Listen for auth state changes
     const { data: authListener } = supabase.auth.onAuthStateChange(
       async (event, session) => {
         if (event === "SIGNED_IN" && session?.user) {
@@ -75,6 +77,7 @@ export default function Home() {
       }
     );
 
+    // Cleanup listener on unmount
     return () => {
       authListener.subscription.unsubscribe();
     };
@@ -162,8 +165,16 @@ export default function Home() {
 
   const costs = calculateMonthlyCosts();
 
+  // Pass onLogin callback to Login component
   if (!user) {
-    return <Login />;
+    return (
+      <Login
+        onLogin={async (supabaseUser) => {
+          const userData = await loadUser(supabaseUser.id);
+          if (userData) setUser(userData);
+        }}
+      />
+    );
   }
 
   return (

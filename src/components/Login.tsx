@@ -1,9 +1,14 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { supabase } from "../utils/supabase";
+import { User } from "@supabase/supabase-js";
 
-export default function Login() {
+interface LoginProps {
+  onLogin: (user: User) => void;
+}
+
+export default function Login({ onLogin }: LoginProps) {
   const [username, setUsername] = useState<string>("");
   const [password, setPassword] = useState<string>("");
   const [role, setRole] = useState<"admin" | "manager" | "member">("member");
@@ -14,7 +19,6 @@ export default function Login() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
-  // Handle normal signup/login
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
@@ -24,7 +28,7 @@ export default function Login() {
     try {
       if (isSignUp) {
         const { data, error: signUpError } = await supabase.auth.signUp({
-          email: `${username}gmail.com`,
+          email: `${username}@gmail.com`,
           password,
           options: {
             data: { username, role },
@@ -32,32 +36,37 @@ export default function Login() {
         });
         if (signUpError) throw signUpError;
 
-        await supabase.from("users").insert({
-          id: data.user!.id,
-          username,
-          role,
-        });
-
-        setMessage("Sign up successful! Please check your email to confirm.");
+        if (data.user) {
+          await supabase.from("users").insert({
+            id: data.user.id,
+            username,
+            role,
+          });
+          setMessage("Sign up successful! Please check your email to confirm.");
+          // You may choose to auto-login or ask user to confirm email before login
+        }
       } else {
-        const { error: signInError } = await supabase.auth.signInWithPassword({
-          email: `${username}@gmail.com`,
-          password,
-        });
+        const { data, error: signInError } =
+          await supabase.auth.signInWithPassword({
+            email: `${username}@gmail.com`,
+            password,
+          });
         if (signInError) throw signInError;
 
-        setMessage("Login successful!");
+        if (data.user) {
+          setMessage("Login successful!");
+          onLogin(data.user);
+        }
       }
     } catch (err: unknown) {
-      const errorMessage =
-        err instanceof Error ? err.message : "An unexpected error occurred";
-      setError(errorMessage);
+      setError(
+        err instanceof Error ? err.message : "An unexpected error occurred"
+      );
     } finally {
       setLoading(false);
     }
   };
 
-  // Handle password reset
   const handlePasswordReset = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
@@ -71,76 +80,34 @@ export default function Login() {
       if (error) throw error;
       setMessage("Password reset email sent! Check your inbox.");
     } catch (err: unknown) {
-      const errorMessage =
-        err instanceof Error ? err.message : "Failed to send reset email.";
-      setError(errorMessage);
+      setError(
+        err instanceof Error ? err.message : "Failed to send reset email."
+      );
     } finally {
       setLoading(false);
     }
   };
 
-  // Handle Google OAuth login
   const handleGoogleLogin = async () => {
     setError(null);
     setMessage(null);
     setLoading(true);
 
     try {
-      // Redirects to Google login
       const { error } = await supabase.auth.signInWithOAuth({
         provider: "google",
         options: {
-          // Optional redirect URL after login, adjust as needed
           redirectTo: window.location.origin,
         },
       });
-
       if (error) throw error;
 
-      // Note: The actual user data insertion will be handled
-      // in an auth state listener below after redirect
+      // Redirect happens automatically; auth listener in Home handles login state update
     } catch (err: unknown) {
-      const errorMessage =
-        err instanceof Error ? err.message : "Google login failed.";
-      setError(errorMessage);
+      setError(err instanceof Error ? err.message : "Google login failed.");
       setLoading(false);
     }
   };
-
-  // Listen for auth state changes (after OAuth redirect)
-  useEffect(() => {
-    const { data: listener } = supabase.auth.onAuthStateChange(
-      async (event, session) => {
-        if (event === "SIGNED_IN" && session?.user) {
-          const user = session.user;
-          // console.log(user);
-
-          try {
-            // Upsert user profile data to users table
-            await supabase.from("users").upsert({
-              id: user.id,
-              username:
-                user.user_metadata?.username || user.email?.split("@")[0] || "",
-              role: "member", // default role, or customize as needed
-            });
-
-            setMessage("Logged in with Google successfully!");
-            setError(null);
-          } catch (dbError: unknown) {
-            if (dbError instanceof Error) {
-              setError(`Error updating user data: ${dbError.message}`);
-            } else {
-              setError(`Error updating user data: ${String(dbError)}`);
-            }
-          }
-        }
-      }
-    );
-
-    return () => {
-      listener.subscription.unsubscribe();
-    };
-  }, []);
 
   if (forgotPassword) {
     return (
@@ -173,7 +140,7 @@ export default function Login() {
             </button>
           </form>
           <p className="mt-4 text-center text-sm">
-            Remember your password?
+            Remember your password?{" "}
             <button
               onClick={() => {
                 setForgotPassword(false);
